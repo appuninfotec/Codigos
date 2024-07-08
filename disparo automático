@@ -52,7 +52,7 @@ function sendTextMessageWhats($urlapi, $tokenapi, $phone, $textomsg, $apikey)
   curl_setopt_array(
     $curl,
     array(
-      CURLOPT_URL => $urlapi . "/message/sendText/AbC123" . $tokenapi,
+      CURLOPT_URL => $urlapi."/message/sendText/AbC123".$tokenapi,
       CURLOPT_RETURNTRANSFER => true,
       CURLOPT_ENCODING => '',
       CURLOPT_MAXREDIRS => 10,
@@ -61,14 +61,14 @@ function sendTextMessageWhats($urlapi, $tokenapi, $phone, $textomsg, $apikey)
       CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
       CURLOPT_CUSTOMREQUEST => 'POST',
       CURLOPT_POSTFIELDS => '{
-      "number": "55' . $phone . '",
+      "number": "55'.$phone.'",
       "options": {
         "delay": 1200,
         "presence": "composing",
         "linkPreview": false
       },
       "textMessage": {
-        "text": "' . $textomsg . '"
+        "text": "' .$textomsg. '"
       }
     }',
       CURLOPT_HTTPHEADER => array(
