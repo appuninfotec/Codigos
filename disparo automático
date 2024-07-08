@@ -1,0 +1,297 @@
+
+text/x-generic cob_auto.php ( PHP script, UTF-8 Unicode text, with CRLF line terminators )
+<?php
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
+date_default_timezone_set('America/Sao_Paulo');
+
+require_once __DIR__ . '/../db/Conexao.php';
+require_once __DIR__ . '/../master/classes/functions.php';
+
+
+
+function sendCurlRequest($url, $token, $data)
+{
+  $curl = curl_init();
+
+  $idempotencyKey = uniqid();
+  curl_setopt_array(
+    $curl,
+    array(
+      CURLOPT_URL => $url,
+      CURLOPT_RETURNTRANSFER => true,
+      CURLOPT_ENCODING => '',
+      CURLOPT_MAXREDIRS => 10,
+      CURLOPT_TIMEOUT => 0,
+      CURLOPT_FOLLOWLOCATION => true,
+      CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+      CURLOPT_CUSTOMREQUEST => 'POST',
+      CURLOPT_POSTFIELDS => $data,
+      CURLOPT_HTTPHEADER => array(
+        'Content-Type: application/json',
+        'Authorization: Bearer ' . $token,
+        'X-Idempotency-Key: ' . $idempotencyKey,
+
+      ),
+    )
+  );
+
+  $response = curl_exec($curl);
+
+  curl_close($curl);
+
+  return $response;
+}
+
+function sendTextMessageWhats($urlapi, $tokenapi, $phone, $textomsg, $apikey)
+{
+  $curl = curl_init();
+
+  curl_setopt_array(
+    $curl,
+    array(
+      CURLOPT_URL => $urlapi . "/message/sendText/AbC123" . $tokenapi,
+      CURLOPT_RETURNTRANSFER => true,
+      CURLOPT_ENCODING => '',
+      CURLOPT_MAXREDIRS => 10,
+      CURLOPT_TIMEOUT => 0,
+      CURLOPT_FOLLOWLOCATION => true,
+      CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+      CURLOPT_CUSTOMREQUEST => 'POST',
+      CURLOPT_POSTFIELDS => '{
+      "number": "55' . $phone . '",
+      "options": {
+        "delay": 1200,
+        "presence": "composing",
+        "linkPreview": false
+      },
+      "textMessage": {
+        "text": "' . $textomsg . '"
+      }
+    }',
+      CURLOPT_HTTPHEADER => array(
+        'Content-Type: application/json',
+        'apikey: ' . $apikey . ''
+      )
+    )
+  );
+
+  curl_exec($curl);
+
+  curl_close($curl);
+}
+
+function sendMediaMessageWhats($urlapi, $tokenapi, $phone, $caption, $base64, $apikey)
+{
+  $curl = curl_init();
+
+  curl_setopt_array(
+    $curl,
+    array(
+      CURLOPT_URL => $urlapi . "/message/sendMedia/AbC123" . $tokenapi,
+      CURLOPT_RETURNTRANSFER => true,
+      CURLOPT_ENCODING => '',
+      CURLOPT_MAXREDIRS => 10,
+      CURLOPT_TIMEOUT => 0,
+      CURLOPT_FOLLOWLOCATION => true,
+      CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+      CURLOPT_CUSTOMREQUEST => 'POST',
+      CURLOPT_POSTFIELDS => '{
+      "number": "55' . $phone . '",
+      "options": {
+        "delay": 1200,
+        "presence": "composing"
+      },
+      "mediaMessage": {
+        "mediatype": "image",
+        "caption": "' . $caption . '",
+        "media": "' . $base64 . '"
+      }
+    }',
+      CURLOPT_HTTPHEADER => array(
+        'Content-Type: application/json',
+        'apikey: ' . $apikey . ''
+      )
+    )
+  );
+
+  curl_exec($curl);
+
+  curl_close($curl);
+}
+
+
+function sendCobAuto($notifyHour, $actualHour, $msg, $urlapi, $tokenapi, $phone, $messageToSend, $apikey, $paymentType, $connect, $idcli, $installment, $firstName, $lastName, $tokenmp, $msgpix, $msgqr)
+{
+  try {
+    $qrcode_base64 = "";
+    $emv = "";
+
+    if ($notifyHour == $actualHour) {
+      // if (true) {
+      $messageToSend = preg_replace('/\s+/', ' ', $messageToSend);
+      $messageToSend = preg_replace('/\n\s*\n/', "\n\n", $messageToSend);
+      $messageToSend = str_replace("\n", "\\n", $messageToSend);
+
+      $messages = [];
+
+      $messages[] = ['type' => 'text', 'phone' => $phone, 'message' => $messageToSend, 'media' => '', 'status' => 'pending'];
+
+      if ($paymentType == "1") {
+        $checkQuery = $connect->prepare("SELECT qrcode, linhad FROM mercadopago WHERE idc = :idcli AND status = 'pending' AND DATE(data) >= DATE_SUB(CURDATE(), INTERVAL 5 DAY)");
+        $checkQuery->execute(['idcli' => $idcli]);
+        $existingRecord = $checkQuery->fetch(PDO::FETCH_ASSOC);
+
+        $qrcode_base64 = $existingRecord['qrcode'];
+        $emv = $existingRecord['linhad'];
+
+        if ($msgpix == "1") {
+          $messages[] = ['type' => 'media', 'phone' => $phone, 'message' => "Pague agora via pix. Leia o QRCode.", 'media' => $qrcode_base64, 'status' => 'pending'];
+        }
+
+        if ($msgqr == "1") {
+          $messages[] = ['type' => 'text', 'phone' => $phone, 'message' => $emv, 'media' => '', 'status' => 'pending'];
+        }
+      }
+
+      error_log("Messages: " . json_encode($messages)); // Adiciona mensagem de log para verificar as mensagens
+
+      $msfg = "*ATENÇÃO* Esta é uma mensagem automática e não precisa ser respondida.\\n*Caso já tenha efetuado o pagamento por favor desconsidere esta cobrança.*";
+      $messages[] = ['type' => 'text', 'phone' => $phone, 'message' => $msfg, 'media' => '', 'status' => 'pending'];
+
+      $messages = array_unique($messages, SORT_REGULAR);
+
+      $insertWarningMessage = $connect->prepare("INSERT INTO message_queue (type, phone, message, media, status) VALUES (?, ?, ?, ?, ?)");
+      foreach ($messages as $message) {
+        $insertWarningMessage->execute([$message['type'], $message['phone'], $message['message'], $message['media'], $message['status']]);
+      }
+
+      $stmt = $connect->prepare("SELECT * FROM message_queue WHERE status = 'pending'");
+      $stmt->execute();
+
+      while ($row = $stmt->fetch(PDO::FETCH_OBJ)) {
+        if ($row->type == 'text') {
+          $messageToSend = str_replace("\\\\n", "\n", $row->message);
+          $result = sendTextMessageWhats($urlapi, $tokenapi, $row->phone, $messageToSend, $apikey);
+        } elseif ($row->type == 'media') {
+          $result = sendMediaMessageWhats($urlapi, $tokenapi, $row->phone, $row->message, $row->media, $apikey);
+        }
+
+        if ($result && $result->getStatusCode() == 200) {
+          $update = $connect->prepare("UPDATE message_queue SET status = 'sent' WHERE id = ?");
+          $update->execute([$row->id]);
+        } else {
+          $update = $connect->prepare("UPDATE message_queue SET status = 'falha' WHERE id = ?");
+          $update->execute([$row->id]);
+          $delete = $connect->prepare("DELETE FROM message_queue WHERE id = ?");
+          $delete->execute([$row->id]);
+        }
+        sleep(1);
+      }
+    }
+  } catch (Exception $exception) {
+    error_log($exception->getMessage());
+  }
+}
+
+$currentDate = date("Ymd");
+$dueDate = date("Ymd", strtotime("+5 days", strtotime($currentDate)));
+$dueDate7 = date("Ymd", strtotime("+7 days", strtotime($currentDate)));
+$beforeDate = date("Ymd", strtotime("+3 days", strtotime($currentDate)));
+$onDueDate = $currentDate;
+
+$actualHour = date('H:i');
+
+
+
+$query = "SELECT * FROM financeiro2 WHERE pagoem = 'n'";
+$payments = $connect->query($query);
+
+while ($paymentsRow = $payments->fetch(PDO::FETCH_OBJ)) {
+  $dateFormated = DateTime::createFromFormat('d/m/Y', $paymentsRow->datapagamento)->format('Ymd');
+
+  /*Convertendo as datas para timestamps Unix*/
+  $currentDateTimestamp = strtotime($currentDate);
+  $dueDateTimestamp = strtotime($dueDate);
+  $dueDate7Timestamp = strtotime($dueDate7);
+  $beforeDateTimestamp = strtotime($beforeDate);
+  $onDueDateTimestamp = strtotime($onDueDate);
+  $dateFormatedTimestamp = strtotime($dateFormated);
+
+  /* Verifica se a data de pagamento está dentro do intervalo correto ou é igual à data atual*/
+  if (($dateFormatedTimestamp <= $dueDate7Timestamp && $dateFormatedTimestamp >= $beforeDateTimestamp) || $dateFormatedTimestamp == $onDueDateTimestamp || $dateFormatedTimestamp < $currentDateTimestamp) {
+    $wallet = $connect->query("SELECT * FROM carteira WHERE Id = '" . $paymentsRow->idm . "'");
+    $walletRow = $wallet->fetch(PDO::FETCH_OBJ);
+    $tokenapi = $walletRow->tokenapi;
+    $token = $walletRow->vjurus;
+    $tokenmp = $walletRow->tokenmp;
+    $company = $walletRow->nomecom;
+    $cnpj = $walletRow->cnpj;
+    $address = $walletRow->enderecom;
+    $phone = $walletRow->contato;
+    $msg = $walletRow->msg;
+    $msgqr = $walletRow->msgqr;
+    $msgpix = $walletRow->msgpix;
+
+    $paymentType = $walletRow->pagamentos;
+
+    $clients = $connect->query("SELECT * FROM clientes WHERE Id='" . $paymentsRow->idc . "'");
+    $clientsRow = $clients->fetch(PDO::FETCH_OBJ);
+
+    if ($clientsRow) {
+      $name = explode(" ", $clientsRow->nome);
+      $firstName = $name[0];
+      $lastName = end($name);
+      $phone = $clientsRow->celular;
+      $idcli = $clientsRow->Id;
+
+      $installment = $paymentsRow->parcela;
+      $idcob = $paymentsRow->Id;
+      $paymentDate = $paymentsRow->datapagamento;
+
+      $bytes = random_bytes(16);
+      $idempotency = bin2hex($bytes);
+
+      $mercadopagoQuery = "SELECT * FROM mercadopago WHERE instancia = " . $idcob;
+      $mercadopago = $connect->query($mercadopagoQuery);
+      $mercadopagoRow = $mercadopago->fetch(PDO::FETCH_OBJ);
+
+      if ($mercadopagoRow) {
+        $linkcob = "/pagamento/?idCob=" . $mercadopagoRow->id . "&idInst=" . $idcob . "&idFin=" . $idcob;
+
+
+        $messageTypes = array(
+          '1' => $dateFormatedTimestamp == $dueDateTimestamp,
+          '2' => $dateFormatedTimestamp == $beforeDateTimestamp,
+          '3' => $dateFormatedTimestamp == $onDueDateTimestamp,
+          '4' => $dateFormatedTimestamp < $currentDateTimestamp,
+          '7' => $dateFormatedTimestamp == $dueDate7Timestamp
+        );
+
+
+        foreach ($messageTypes as $type => $condition) {
+          if ($condition) {
+            $messages = $connect->query("SELECT * FROM mensagens WHERE tipo = '$type' AND status = 1 AND idu = '" . $paymentsRow->idm . "'");
+            $messagesRow = $messages->fetch(PDO::FETCH_OBJ);
+
+            if ($messagesRow) {
+              $name = explode(" ", $clientsRow->nome);
+              $lastName = array_pop($name);
+              $firstName = implode(" ", $name);
+
+              $search = array('#NOME#', '#VENCIMENTO#', '#VALOR#', '#LINK#', '#EMPRESA#', '#CNPJ#', '#ENDERECO#', '#CONTATO#');
+              $replace = array($firstName . " " . $lastName, $paymentDate, $installment, $linkcob, $company, $cnpj, $address, $phone);
+              $message = str_replace($search, $replace, $messagesRow->msg);
+              $messageToSend = str_replace("\n", "\\n", $message);
+
+              sendCobAuto($messagesRow->hora, $actualHour, $msg, $urlapi, $tokenapi, $phone, $messageToSend, $apikey, $paymentType, $connect, $idcli, $installment, $firstName, $lastName, $tokenmp, $msgpix, $msgqr);
+            }
+
+          }
+        }
+      }
+    }
+  }
+}
